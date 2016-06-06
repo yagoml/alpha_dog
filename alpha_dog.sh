@@ -2,13 +2,34 @@
 #######################################################################################################
 ########################################### ALPHA_DOG 1.0 #############################################
 ######################################### ARP TABLE PROTECTOR ######################################### 
-############### Author: Yago M. Laignie®  #####  All rights reserved 2016 #############################
+###############$$$$$$$$ Author: Yago M. Laignie®  #####  All rights reserved 2016 #####################
 #######################################################################################################
 
 RANGE=$1 	# TARGET NETWORK RANGE IPs
 PORT=$2 	# TARGET PORT
-PROTOCOL=$3 # LOWERCASE !
+PROTOCOL=$3 	# LOWERCASE !
 COM=$4		# COMMUNITY
+
+# CHECK LOCAL IPs
+NUM_LOCAL_IPs=$(snmpwalk -v1 -c $COM localhost .1.3.6.1.2.1.4.20.1.1 | wc -l)
+
+if (($NUM_LOCAL_IPs < 2));then
+	echo "IP Lan local não definido, saindo..."
+	exit
+fi
+
+ROWS_THIS_TABLE=$(snmpwalk -v1 -c $COM localhost .1.3.6.1.2.1.3.1.1.2.2.1 | wc -l)
+
+if (($ROWS_THIS_TABLE < 3));then
+	echo 'É necessário popular a tabela ARP deste host...'
+	echo 'Digite a faixa de ips (range) da rede para gerar a tabela:'
+	read RANGE_TABLE
+	if [ $RANGE_TABLE != '' ]; then
+		# Scan to populate this host arp table
+		nmap -sS -O -P0 -p $PORT -v $RANGE_TABLE
+	fi
+
+fi
 
 # Get real open $PORT IPs:
 #FIND_IPs=$(nmap -sS -O -P0 -p $PORT -v $RANGE | grep -E open[[:space:]]port[[:space:]]$PORT/$PROTOCOL | cut -d' ' -f6)
@@ -16,12 +37,14 @@ COM=$4		# COMMUNITY
 # Play TEST with local IPs:
 FIND_IPs=('localhost 127.0.0.1')
 
+LAN_IP=$(snmpgetnext -v1 -c $COM localhost .1.3.6.1.2.1.4.20.1.1.127.0.0.1 | awk {'print $4'})
+
 # Determine length of IPs string by words
 ROWS=$(echo $FIND_IPs | wc -w)
 # Arp Tables save directory
 mkdir -p arp_tables
 
-# Walk on Find IPs getting and saving its arp tables, then compares it with original services.conf MAC Addresses
+# Walk on Find IPs getting and saving its arp tables, then compares it with original services.conf MAC Addressesice 
 for i in $(seq $ROWS); do 
 	THIS_IP=$(echo $FIND_IPs | cut -d' ' -f$i)
 	./arp_walker.sh $THIS_IP $COM
@@ -49,8 +72,12 @@ for i in $(seq $ROWS); do
 						echo -e "\033[1;34mBlocking actual MAC Adress of $CONFIG_NAME service...\033[0m"
 						echo -e "\033[1;34mReconfiguring $CONFIG_NAME service with original MAC Address: $CONFIG_MAC...\033[0m"
 						echo -e "\033[1;34mAdded to alert list.\033[0m"
+						while read ROW; do
+							MAIL=$ROW
+							echo "Alert danger found in host: $LAN_IP for service $CONFIG_NAME: IP: $ARP_IP -> MAC: $ARP_MAC - MAC Address doesn't match with original $CONFIG_NAME MAC Address ($CONFIG_MAC)" | mail -s "Alpha Dog Alert-Danger!" $MAIL
+						done < mail.conf
 					else
-						echo -e "\033[1;32mService $CONFIG_NAME: IP:$ARP_IP -> MAC: $ARP_MAC\033[0m"
+						echo -e "\033[1;32mService $CONFIG_NAME: IP: $ARP_IP -> MAC: $ARP_MAC\033[0m"
 					fi	
 				fi
 			fi
@@ -59,6 +86,7 @@ for i in $(seq $ROWS); do
 	done
 	mv $THIS_IP.arp_table arp_tables
 done
+
 echo -e "\033[1;34mSendind alert list to group mails...\033[0m"
 
 exit
