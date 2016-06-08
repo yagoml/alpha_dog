@@ -51,7 +51,7 @@ for i in $(seq $ROWS); do
 	echo ""
 	echo -e "\033[4mHOST: $THIS_IP\033[0m"
 
-	grep -v '#' services.conf | while read -r ROW ; do	
+	grep -v '#' services.conf | while read -r ROW ; do
 		CONFIG_NAME=$(echo $ROW | cut -d',' -f1)
 		CONFIG_IP=$(echo $ROW | cut -d',' -f2)
 		CONFIG_MAC=$(echo $ROW | cut -d',' -f3)
@@ -62,23 +62,26 @@ for i in $(seq $ROWS); do
 			if (($i > 2)); then # Scape header lines
 				ARP_IP=$(echo $ROW | cut -d'-' -f1 | sed 's/^[ \t]*//;s/[ \t]*$//') # Explode and remove spaces.	
 				ARP_MAC=$(echo $ROW | cut -d'-' -f2 | sed 's/^[ \t]*//;s/[ \t]*$//')
-		
 				NS_MAC=$(echo $ARP_MAC | tr -d '[[:space:]]')
+				FW_MAC=$(echo $ARP_MAC | tr '[[:space:]]' ':')
 
 				if [ $CONFIG_IP == $ARP_IP ]; then
 					if [ $NS_CONFIG_MAC != $NS_MAC ]; then
 						echo -e "\033[01;31mService $CONFIG_NAME: IP:$ARP_IP -> MAC: $ARP_MAC\033[0m"
 						echo -e "\033[01;31mALERT DANGER! MAC Address doesn't match with original $CONFIG_NAME MAC Address !\033[0m"
-						echo -e "\033[1;34mBlocking actual MAC Adress of $CONFIG_NAME service...\033[0m"
+						echo -e "\033[1;34mBlocking divergent MAC Adress of $CONFIG_NAME service...\033[0m"
+						iptables -A FORWARD -m mac --mac-source $FW_MAC -j DROP
 						echo -e "\033[1;34mReconfiguring $CONFIG_NAME service with original MAC Address: $CONFIG_MAC...\033[0m"
-						echo -e "\033[1;34mAdded to alert list.\033[0m"
+						snmpset -v 2c -c $COM $IP .1.3.6.1.2.1.3.1.1.2.2.1.$ARP_IP x $CONFIG_MAC
+						echo -e "\033[1;34mSending Alert...!\033[0m"
 						while read ROW; do
 							MAIL=$ROW
 							echo "Alert danger found in host: $LAN_IP for service $CONFIG_NAME: IP: $ARP_IP -> MAC: $ARP_MAC - MAC Address doesn't match with original $CONFIG_NAME MAC Address ($CONFIG_MAC)" | mail -s "Alpha Dog Alert-Danger!" $MAIL
 						done < mail.conf
+
 					else
 						echo -e "\033[1;32mService $CONFIG_NAME: IP: $ARP_IP -> MAC: $ARP_MAC\033[0m"
-					fi	
+					fi
 				fi
 			fi
 			i=$((i+1))
@@ -86,7 +89,5 @@ for i in $(seq $ROWS); do
 	done
 	mv $THIS_IP.arp_table arp_tables
 done
-
-echo -e "\033[1;34mSendind alert list to group mails...\033[0m"
 
 exit
